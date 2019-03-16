@@ -1,11 +1,18 @@
 package com.example.funwithimages
 
+import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.os.AsyncTask
 import android.os.Bundle
 import android.support.v7.app.AppCompatActivity
+import android.text.TextUtils
 import android.util.Log
 import com.example.funwithimages.data.HelloWorldService
+import io.grpc.ManagedChannel
+import io.grpc.ManagedChannelBuilder
+import io.grpc.examples.helloworld.GreeterGrpc
+import io.grpc.examples.helloworld.HelloRequest
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.schedulers.Schedulers
 import kotlinx.android.synthetic.main.activity_main.*
@@ -18,9 +25,9 @@ import retrofit2.Retrofit
 import retrofit2.adapter.rxjava2.RxJava2CallAdapterFactory
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.converter.scalars.ScalarsConverterFactory
-import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.FileOutputStream
+import java.io.*
+import java.lang.ref.WeakReference
+import java.util.concurrent.TimeUnit
 
 
 class MainActivity : AppCompatActivity() {
@@ -85,5 +92,59 @@ class MainActivity : AppCompatActivity() {
                     Log.d("hello", "image worked:$it")
                 }, { Log.d("hello", "image error") })
         }
+
+        buttonGRPC.setOnClickListener {
+            GrpcTask(this)
+                .execute(
+                    "10.0.2.2",
+                    "GRPC-NAME",
+                    "50051"
+                )
+
+        }
+    }
+}
+
+class GrpcTask constructor(activity: Activity) : AsyncTask<String, Void, String>() {
+    private val activityReference: WeakReference<Activity>
+    private var channel: ManagedChannel? = null
+
+    init {
+        this.activityReference = WeakReference<Activity>(activity)
+    }
+
+    override fun doInBackground(vararg params: String): String {
+        val host = params[0]
+        val message = params[1]
+        val portStr = params[2]
+        val port = if (TextUtils.isEmpty(portStr)) 0 else Integer.valueOf(portStr)
+        try {
+            channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build()
+            val stub = GreeterGrpc.newBlockingStub(channel)
+            val request = HelloRequest.newBuilder().setName(message).build()
+            val reply = stub.sayHello(request)
+            return reply.message
+        } catch (e: Exception) {
+            val sw = StringWriter()
+            val pw = PrintWriter(sw)
+            e.printStackTrace(pw)
+            pw.flush()
+            return String.format("Failed... : %n%s", sw)
+        }
+
+    }
+
+    override fun onPostExecute(result: String) {
+        try {
+            channel?.shutdown()?.awaitTermination(1, TimeUnit.SECONDS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+
+        val activity = activityReference.get() ?: return
+//            val resultText = activity.findViewById(R.id.grpc_response_text) as TextView
+//            val sendButton = activity.findViewById(R.id.send_button) as Button
+        activity.textView.text = result
+//            sendButton.setEnabled(true)
     }
 }
